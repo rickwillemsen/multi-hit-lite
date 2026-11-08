@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Multi-hit Gene Combinations</title>
+    <meta name="description" content="Runs the greedy heuristic for tumor-specific gene combinations in your browser, also offline." />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <meta name="theme-color" content="#1f5f8b" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="wrap">
+        <h1>Multi-hit gene combinations</h1>
+        <p class="lead">
+          Identifies multi-hit combinations, using a greedy heuristic. It selects a set of gene combinations that together cover as many tumor samples as possible,
+          while covering as few normal samples as possible. Everything runs in this browser tab: your files are never uploaded.
+        </p>
+        <div class="papers">
+          <p>References</p>
+          <ul>
+            <li>This tool is based on: <a href="https://arxiv.org/abs/2610.09420" target="_blank" rel="noopener">arXiv:2610.09420</a></li>
+            <li>A more advanced method, which requires optimization solvers (CPLEX or Google OR-Tools), was introduced at CP 2026: <a href="https://doi.org/10.4230/LIPIcs.CP.2026.57" target="_blank" rel="noopener">10.4230/LIPIcs.CP.2026.57</a>. Its implementation is publicly available at <a href="https://github.com/rickwillemsen/MHCDSCP" target="_blank" rel="noopener">github.com/rickwillemsen/MHCDSCP</a>.</li>
+          </ul>
+        </div>
+        <p id="offline-status" class="badge" hidden></p>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <section class="card viz-switch">
+        <div class="switch"><label class="sw-hit"><input type="checkbox" id="viz-toggle" role="switch" aria-labelledby="viz-toggle-label" /><span class="sw" aria-hidden="true"></span></label><span class="st" aria-hidden="true"><span class="st-off">Off</span><span class="st-on">On</span></span><span id="viz-toggle-label">Step-by-step visualization</span><svg class="warn-icon" viewBox="0 0 24 24" role="img" aria-label="Warning: turning this on resets all settings"><path d="M12 2.5 1.5 21h21L12 2.5Z" /><rect x="11" y="9" width="2" height="6.5" rx="1" /><circle cx="12" cy="18" r="1.2" /></svg></div>
+        <p class="hint">
+          Shows how the method works on a small dataset, step by step. Turning this on <strong>resets all settings</strong> to a small example (8 genes, 7 tumor and 4 normal samples,
+          6 candidate gene combinations); turning it off restores the normal defaults. You can still change the settings or upload your own data, but the visualization
+          is only readable for small datasets (up to about 15 genes and 20 samples per class).
+        </p>
+        <p class="ok-box" id="viz-ready" hidden>Settings reset to the small example. Click <strong>Generate data</strong> below to start.</p>
+      </section>
+
+      <section class="card" id="step-data">
+        <h2><span class="num">1</span> Data</h2>
+        <div class="tabs" role="tablist">
+          <button role="tab" id="tab-generate" aria-selected="true" aria-controls="panel-generate">Synthetic data</button>
+          <button role="tab" id="tab-upload" aria-selected="false" aria-controls="panel-upload">Upload CSV files</button>
+        </div>
+
+        <div id="panel-generate" role="tabpanel">
+          <p class="hint">Makes a random normal and tumor file with a few planted gene combinations that occur mostly in tumor samples, so you can see whether the heuristic finds them.</p>
+          <form id="synthetic-form" class="groups" novalidate></form>
+          <div class="actions">
+            <button id="btn-generate" class="primary" type="button">Generate data</button>
+            <button id="btn-syn-defaults" type="button">Reset to defaults</button>
+          </div>
+          <div id="synthetic-info"></div>
+        </div>
+
+        <div id="panel-upload" role="tabpanel" hidden>
+          <div class="grid two">
+            <label class="drop" id="drop-normal">
+              <span class="drop-title">Normal samples</span>
+              <span class="drop-file" id="name-normal">Choose or drop a CSV file</span>
+              <input type="file" id="file-normal" accept=".csv,text/csv" />
+            </label>
+            <label class="drop" id="drop-tumor">
+              <span class="drop-title">Tumor samples</span>
+              <span class="drop-file" id="name-tumor">Choose or drop a CSV file</span>
+              <input type="file" id="file-tumor" accept=".csv,text/csv" />
+            </label>
+          </div>
+          <details class="format">
+            <summary>Required file format</summary>
+            <p>Two CSV files, one with normal samples and one with tumor samples, in this format:</p>
+            <pre>3,5
+0,ENSG00000141510,0,1,0,0,1
+1,ENSG00000171862,1,1,0,0,0
+2,ENSG00000157764,0,0,0,1,0</pre>
+            <ul>
+              <li>Line 1: number of genes, number of samples.</li>
+              <li>Then one line per gene: row number (0, 1, 2, …), gene ID, then a 0 or 1 for every sample (1 = mutated).</li>
+              <li>Both files must list the same genes in the same order; the number of samples may differ.</li>
+            </ul>
+          </details>
+        </div>
+
+        <div id="validation" aria-live="polite"></div>
+        <div id="viz-data" class="vbox" hidden></div>
+
+        <h3>Exclusion list <span class="optional">optional</span></h3>
+        <p class="hint">Genes on this list are left out of the analysis. Use a text or CSV file with one gene ID per line, written exactly as in the data files (if a line has several columns, the first is used; lines starting with # are skipped).</p>
+        <div class="grid two">
+          <label class="drop" id="drop-exclusion">
+            <span class="drop-title">Genes to exclude</span>
+            <span class="drop-file" id="name-exclusion">Choose or drop a file (optional)</span>
+            <input type="file" id="file-exclusion" accept=".csv,.txt,text/csv,text/plain" />
+          </label>
+        </div>
+        <div class="actions"><button id="btn-exclusion-clear" type="button" hidden>Remove exclusion list</button></div>
+        <div id="exclusion-status" aria-live="polite"></div>
+      </section>
+
+      <section class="card" id="step-settings">
+        <h2><span class="num">2</span> Settings</h2>
+        <p class="hint">With the same data and settings, including the random seed, every run gives the same result.</p>
+        <form id="params-form" class="groups" novalidate></form>
+        <div class="actions">
+          <button id="btn-defaults" type="button">Reset to defaults</button>
+        </div>
+      </section>
+
+      <section class="card" id="step-run">
+        <h2><span class="num">3</span> Run</h2>
+        <div class="actions">
+          <button id="btn-run" class="primary" type="button" disabled>Run greedy heuristic</button>
+          <button id="btn-cancel" type="button" hidden>Cancel</button>
+        </div>
+        <p id="run-status" class="status" aria-live="polite">Load data first.</p>
+        <p id="viz-method-note" class="hint vbox" hidden></p>
+        <div id="viz-method" class="vbox" hidden></div>
+      </section>
+
+      <section class="card" id="step-results" hidden>
+        <h2><span class="num">4</span> Results</h2>
+        <div id="results"></div>
+        <div id="viz-solution" class="vbox" hidden></div>
+        <div class="actions">
+          <button id="btn-dl-combos" type="button">Download gene combinations (CSV)</button>
+          <button id="btn-dl-metrics" type="button">Download scores and settings (CSV)</button>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
